@@ -26,6 +26,9 @@ confidence instead of prose. Output is a structured JSON document listing the
 required reviewer types — fast and cheap enough to run on every push, and
 impossible to get an unparseable or invented answer out of.
 
+It is a single dependency-free Rust binary (~4 MB), so a run is a process start
+plus one HTTP request per diff chunk.
+
 ```json
 {
   "required_reviewers": ["devops"],
@@ -120,7 +123,7 @@ Gate a job on the result:
 ## Use locally
 
 ```bash
-pip install review-gate           # or: uv tool install review-gate
+cargo install --git https://github.com/czinegeroland/review-gate review-gate
 export TYPESAFE_API_KEY=...       # https://console.typesafe.ai/
 
 review-gate validate --config .github/review-gate.yml
@@ -128,7 +131,7 @@ review-gate evaluate --base origin/main --head HEAD
 git diff origin/main | review-gate evaluate --diff-file -
 ```
 
-Or with the container image:
+Or with the container image (the same image the action runs):
 
 ```bash
 docker run --rm -e TYPESAFE_API_KEY -v "$PWD:/src" -w /src \
@@ -208,14 +211,27 @@ Exit codes: `0` completed · `1` unexpected error · `2` invalid config or usage
 ## Development
 
 ```bash
-uv venv && . .venv/bin/activate
-uv pip install -e ".[dev]"
-ruff check . && mypy && pytest
+cargo fmt --all --check
+cargo clippy --all-targets -- -D warnings
+cargo test
 ```
 
-Tests never touch the network: the HTTP client is exercised through
-`httpx.MockTransport`, and the CLI can answer from a fixture with
-`--mock-answers` / `REVIEW_GATE_MOCK_ANSWERS`.
+Tests never reach the network. `tests/http.rs` runs the real client against a
+throwaway `TcpListener` on localhost, which covers the request shape, the retry
+policy and the error mapping; everything above the client is driven by a fake
+classifier, and the CLI can answer from a fixture with `--mock-answers` /
+`REVIEW_GATE_MOCK_ANSWERS`.
+
+| File | What lives there |
+| --- | --- |
+| `src/config.rs` | YAML rules, validation, compiled path filters |
+| `src/diff.rs` | Unified-diff parsing, hunk splitting, chunking |
+| `src/classifier.rs` | TypeSafe System One client and the fixture-backed mock |
+| `src/engine.rs` | Fan-out, aggregation, threshold and confidence gating |
+| `src/report.rs` | JSON schema 1.0, Markdown summary, action outputs |
+| `src/main.rs` | CLI |
+
+Minimum supported Rust version: 1.88.
 
 ## Licence
 
