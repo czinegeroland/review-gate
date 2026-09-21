@@ -1,0 +1,4 @@
+{
+  "lambda-event-contract": {"probability": 0.94, "confidence": 0.88},
+  "test-removed": {"probability": 0.05, "confidence": 0.95}
+}

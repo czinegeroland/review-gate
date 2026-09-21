@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  lint:
+    name: Format and clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --all-targets --locked
+      - name: Check the action entrypoint argument handling
+        run: tests/entrypoint_test.sh
+      - name: Validate the shipped rule sets
+        run: |
+          cargo run --quiet -- validate --config .github/review-gate.yml
+          cargo run --quiet -- validate --config examples/review-gate.example.yml
+
+  msrv:
+    name: Minimum supported Rust version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --all-targets --locked
+
+  end-to-end:
+    name: End-to-end (mocked model)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Classify a sample diff
+        run: |
+          cargo run --quiet --locked -- evaluate \
+            --config tests/fixtures/e2e-config.yml \
+            --diff-file tests/fixtures/sample.diff \
+            --mock-answers tests/fixtures/mock-answers.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --output result.json \
+            --markdown summary.md
+
+      - name: Assert the expected reviewer set
+        run: |
+          jq -e '
+            .schema_version == "1.0"
+            and .required_reviewers == ["devops"]
+            and .degraded == false
+            and ([.decisions[] | select(.fired) | .rule_id] == ["lambda-event-contract"])
+          ' result.json > /dev/null
+          echo "end-to-end OK: $(jq -c .required_reviewers result.json)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: review-gate-sample-output
+          path: |
+            result.json
+            summary.md
+
+  action:
+    name: Container action
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run the action on a sample diff
+        id: gate
+        uses: ./
+        with:
+          config: tests/fixtures/e2e-config.yml
+          diff-file: tests/fixtures/sample.diff
+          mock-answers: tests/fixtures/mock-answers.json
+          output: action-result.json
+          markdown: action-summary.md
+
+      - name: Assert the action outputs
+        env:
+          REVIEWERS: ${{ steps.gate.outputs.required_reviewers_csv }}
+          COUNT: ${{ steps.gate.outputs.reviewer_count }}
+          DEGRADED: ${{ steps.gate.outputs.degraded }}
+        run: |
+          test "$REVIEWERS" = "devops" || { echo "unexpected reviewers: '$REVIEWERS'"; exit 1; }
+          test "$COUNT" = "1" || { echo "unexpected count: '$COUNT'"; exit 1; }
+          test "$DEGRADED" = "false" || { echo "unexpected degraded: '$DEGRADED'"; exit 1; }
+          test -f action-result.json
+
+      - name: Smoke test the image as a plain CLI
+        run: |
+          docker build -q -t review-gate:ci .
+          docker run --rm review-gate:ci --version
+          docker run --rm -v "$PWD:/src" -w /src \
+            -e REVIEW_GATE_MOCK_ANSWERS=tests/fixtures/mock-answers.json \
+            review-gate:ci evaluate \
+              --config tests/fixtures/e2e-config.yml \
+              --diff-file tests/fixtures/sample.diff \
+            | jq -e '.required_reviewers == ["devops"]' > /dev/null

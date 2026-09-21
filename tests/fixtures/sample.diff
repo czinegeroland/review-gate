@@ -1,0 +1,19 @@
+diff --git a/services/orders/handler.py b/services/orders/handler.py
+index 1111111..2222222 100644
+--- a/services/orders/handler.py
++++ b/services/orders/handler.py
+@@ -10,8 +10,7 @@ def handler(event, context):
+-    customer_id = event["customerId"]
+-    order_id = event["orderId"]
++    order_id = event["order_id"]
+     return {"statusCode": 200, "body": order_id}
+diff --git a/infra/stack.ts b/infra/stack.ts
+index 3333333..4444444 100644
+--- a/infra/stack.ts
++++ b/infra/stack.ts
+@@ -4,7 +4,7 @@ export class OrdersStack extends Stack {
+-    const fn = new Function(this, "Orders", props);
++    const ordersFunction = new Function(this, "Orders", props);
+diff --git a/assets/logo.png b/assets/logo.png
+index 5555555..6666666 100644
+Binary files a/assets/logo.png and b/assets/logo.png differ

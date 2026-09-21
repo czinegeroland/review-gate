@@ -1,0 +1,65 @@
+name: Review Gate
+description: Classify a pull request diff into the reviewer types it actually needs, using TypeSafe AI's Jev model.
+author: czinegeroland
+branding:
+  icon: filter
+  color: purple
+
+inputs:
+  config:
+    description: Path to the rule configuration.
+    default: .github/review-gate.yml
+  base:
+    description: Base git ref to diff against. Defaults to the pull request base SHA.
+    default: ""
+  head:
+    description: Head git ref. Defaults to the pull request head SHA.
+    default: ""
+  diff-file:
+    description: Use this unified diff instead of computing one with git.
+    default: ""
+  typesafe-api-key:
+    description: TypeSafe API key (https://console.typesafe.ai/). Required unless mock-answers is set.
+    default: ""
+  model:
+    description: Override the model id from the configuration.
+    default: ""
+  output:
+    description: Where to write the JSON result.
+    default: review-gate-result.json
+  markdown:
+    description: Where to write the Markdown summary.
+    default: review-gate-summary.md
+  fail-on-degraded:
+    description: Fail the step when classification was incomplete.
+    default: "false"
+  comment:
+    description: Post (and update) a summary comment on the pull request.
+    default: "false"
+  github-token:
+    description: Token used when comment is true.
+    default: ""
+  mock-answers:
+    description: JSON fixture of rule answers; for testing without an API key.
+    default: ""
+
+outputs:
+  required_reviewers:
+    description: JSON array of required reviewer types.
+  required_reviewers_csv:
+    description: Comma separated required reviewer types.
+  required_reviewer_teams:
+    description: JSON array of the team slugs mapped to the required reviewer types.
+  reviewer_count:
+    description: Number of required reviewer types.
+  degraded:
+    description: "true when classification was incomplete and the fallback set was applied."
+  result_path:
+    description: Path of the JSON result file.
+  markdown_path:
+    description: Path of the Markdown summary file.
+
+runs:
+  using: docker
+  image: Dockerfile
+  entrypoint: /usr/local/bin/review-gate-entrypoint

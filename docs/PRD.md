@@ -185,22 +185,27 @@ reviewer set on failure.
 
 * p95 wall clock < 10 s for a 50-file PR with 20 rules (chunks run concurrently).
 * No diff content is written to logs at default verbosity.
-* Pure stdlib + `httpx`, `pydantic`, `PyYAML`; no TypeSafe SDK dependency — the
-  documented HTTP contract is small and this keeps the image installable while
-  Jev is in early access. The client is behind an interface so the official SDK
-  can be swapped in.
-* Python 3.11+, container image based on `python:3.12-slim`.
+* Rust, shipped as one static-ish binary (`clap`, `serde`, `serde_yaml`,
+  `globset`, `ureq`); no TypeSafe SDK dependency — the documented HTTP contract
+  is small and this keeps the tool installable while Jev is in early access. The
+  client sits behind the `Classifier` trait so the official SDK can be swapped
+  in. Chunks are classified on a bounded pool of OS threads.
+* Minimum supported Rust version 1.88; the container image is a multi-stage
+  build on `rust:1-slim-bookworm` and `debian:bookworm-slim`, and doubles as the
+  GitHub container action.
 
 ## 7. Testing & CI
 
-* Unit tests for config validation, diff parsing/chunking, threshold and
-  aggregation logic, report rendering, CLI exit codes — the model client is
-  faked, no network in tests.
+* Tests for config validation, diff parsing/chunking, threshold and aggregation
+  logic, report rendering and CLI exit codes, with the model behind a fake. The
+  HTTP client itself is tested against a local `TcpListener` — request shape,
+  retries, error mapping — so no test reaches the network.
 * `REVIEW_GATE_MOCK_ANSWERS=<file.json>` makes the CLI answer from a fixture
   instead of calling the API, so CI can run a full end-to-end evaluation on a
   sample diff without a key.
-* CI (GitHub Actions) runs: ruff, mypy, pytest with coverage, the end-to-end
-  mock run, an `action.yml` smoke test and a Docker image build.
+* CI (GitHub Actions) runs: `cargo fmt --check`, `cargo clippy -D warnings`,
+  `cargo test`, an MSRV check, the end-to-end mock run, and the container action
+  against a sample diff plus a plain-CLI image smoke test.
 
 ## 8. Rollout
 
