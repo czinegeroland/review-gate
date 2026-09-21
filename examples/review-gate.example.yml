@@ -1,0 +1,79 @@
+# A starting point for a typical AWS/CDK service repository.
+version: 1
+
+defaults:
+  threshold: 0.6          # Noul probability at/above which a rule fires
+  min_confidence: 0.55    # answers below this are "unsure"
+  on_low_confidence: require
+  model: jev-latest
+  max_files: 200
+  max_chunk_chars: 60000
+  max_concurrency: 4
+
+reviewers:
+  devops:
+    description: Infrastructure, deployment and runtime configuration.
+    team: acme/platform
+  backend:
+    description: Service code and API contracts.
+    team: acme/backend
+  qa:
+    description: Test strategy and release verification.
+    team: acme/qa
+  security:
+    description: Authentication, authorization and data handling.
+    team: acme/security
+
+fallback_reviewers: [devops, backend]
+
+ignore_paths:
+  - "**/*.snap"
+  - "**/package-lock.json"
+
+rules:
+  - id: lambda-event-contract
+    question: >-
+      A parameter that an AWS Lambda handler reads from its input event is removed or
+      renamed.
+    reviewers: [devops, backend]
+    criteria:
+      "true": The handler stops reading a field from the event, or reads it under a new key.
+      "false": Only local variables, logging, comments or formatting changed.
+
+  - id: iam-permission-widened
+    question: >-
+      An IAM policy, role or resource grant becomes broader — more actions, more
+      resources, or a wildcard where there was none.
+    reviewers: [devops, security]
+    threshold: 0.5
+
+  - id: infra-replacement-risk
+    question: >-
+      An infrastructure change would replace or delete a stateful resource such as a
+      database, bucket, queue or table, rather than updating it in place.
+    reviewers: [devops]
+    criteria:
+      "true": A logical id, physical name, partition key or removal policy of a stateful resource changes.
+      "false": Only tags, descriptions, memory/timeout settings or local variable names change.
+
+  - id: public-api-breaking-change
+    question: >-
+      A request or response field of a publicly consumed HTTP API is removed, renamed, or
+      its type or required-ness changes.
+    reviewers: [backend, qa]
+
+  - id: auth-path-change
+    question: >-
+      Code that authenticates or authorizes a request changes who is allowed through.
+    reviewers: [security]
+    threshold: 0.5
+
+  - id: data-migration
+    question: >-
+      The change alters an existing persisted schema or rewrites stored data, so it cannot
+      be rolled back by deploying the previous version.
+    reviewers: [devops, qa]
+
+  - id: test-coverage-removed
+    question: An existing test is deleted, skipped or weakened without an equivalent replacement.
+    reviewers: [qa]

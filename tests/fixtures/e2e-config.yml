@@ -1,0 +1,29 @@
+# Configuration used by the CI end-to-end run against tests/fixtures/sample.diff.
+version: 1
+
+defaults:
+  threshold: 0.6
+  min_confidence: 0.55
+
+reviewers:
+  devops:
+    description: Infrastructure and runtime contracts.
+    team: acme/platform
+  qa:
+    description: Test coverage.
+
+fallback_reviewers: [devops]
+
+rules:
+  - id: lambda-event-contract
+    question: >-
+      A parameter that an AWS Lambda handler reads from its input event is removed or renamed.
+    reviewers: [devops]
+    criteria:
+      "true": The handler stops reading a field from the event, or reads it under a new key.
+      "false": Only local variables, logging, comments or formatting changed.
+    paths: ["**/*.py"]
+
+  - id: test-removed
+    question: An existing test is deleted, skipped or weakened without an equivalent replacement.
+    reviewers: [qa]

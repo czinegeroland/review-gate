@@ -1,0 +1,114 @@
+name: Review Gate
+description: Classify a pull request diff into the reviewer types it actually needs, using TypeSafe AI's Jev model.
+author: czinegeroland
+branding:
+  icon: filter
+  color: purple
+
+inputs:
+  config:
+    description: Path to the rule configuration.
+    default: .github/review-gate.yml
+  base:
+    description: Base git ref to diff against. Defaults to the pull request base SHA.
+    default: ""
+  head:
+    description: Head git ref. Defaults to the pull request head SHA.
+    default: ""
+  diff-file:
+    description: Use this unified diff instead of computing one with git.
+    default: ""
+  typesafe-api-key:
+    description: TypeSafe API key (https://console.typesafe.ai/). Required unless mock-answers is set.
+    default: ""
+  model:
+    description: Override the model id from the configuration.
+    default: ""
+  output:
+    description: Where to write the JSON result.
+    default: review-gate-result.json
+  markdown:
+    description: Where to write the Markdown summary.
+    default: review-gate-summary.md
+  fail-on-degraded:
+    description: Fail the step when classification was incomplete.
+    default: "false"
+  comment:
+    description: Post (and update) a summary comment on the pull request.
+    default: "false"
+  github-token:
+    description: Token used when comment is true.
+    default: ""
+  mock-answers:
+    description: JSON fixture of rule answers; for testing without an API key.
+    default: ""
+
+outputs:
+  required_reviewers:
+    description: JSON array of required reviewer types.
+    value: ${{ steps.gate.outputs.required_reviewers }}
+  required_reviewers_csv:
+    description: Comma separated required reviewer types.
+    value: ${{ steps.gate.outputs.required_reviewers_csv }}
+  required_reviewer_teams:
+    description: JSON array of the team slugs mapped to the required reviewer types.
+    value: ${{ steps.gate.outputs.required_reviewer_teams }}
+  reviewer_count:
+    description: Number of required reviewer types.
+    value: ${{ steps.gate.outputs.reviewer_count }}
+  degraded:
+    description: "true when classification was incomplete and the fallback set was applied."
+    value: ${{ steps.gate.outputs.degraded }}
+  result_path:
+    description: Path of the JSON result file.
+    value: ${{ steps.gate.outputs.result_path }}
+  markdown_path:
+    description: Path of the Markdown summary file.
+    value: ${{ steps.gate.outputs.markdown_path }}
+
+runs:
+  using: composite
+  steps:
+    - id: gate
+      shell: bash
+      env:
+        TYPESAFE_API_KEY: ${{ inputs.typesafe-api-key }}
+        INPUT_CONFIG: ${{ inputs.config }}
+        INPUT_BASE: ${{ inputs.base != '' && inputs.base || github.event.pull_request.base.sha }}
+        INPUT_HEAD: ${{ inputs.head != '' && inputs.head || github.event.pull_request.head.sha }}
+        INPUT_DIFF_FILE: ${{ inputs.diff-file }}
+        INPUT_MODEL: ${{ inputs.model }}
+        INPUT_OUTPUT: ${{ inputs.output }}
+        INPUT_MARKDOWN: ${{ inputs.markdown }}
+        INPUT_FAIL_ON_DEGRADED: ${{ inputs.fail-on-degraded }}
+        INPUT_MOCK_ANSWERS: ${{ inputs.mock-answers }}
+        INPUT_REPO: ${{ github.repository }}
+        INPUT_PR_NUMBER: ${{ github.event.pull_request.number }}
+        INPUT_PR_TITLE: ${{ github.event.pull_request.title }}
+        INPUT_PR_BODY: ${{ github.event.pull_request.body }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        python3 -m pip install --quiet --disable-pip-version-check "$ACTION_PATH"
+        bash "$ACTION_PATH/entrypoint.sh"
+
+    - if: ${{ inputs.comment == 'true' && github.event_name == 'pull_request' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        MARKDOWN: ${{ inputs.markdown }}
+        PR: ${{ github.event.pull_request.number }}
+        REPO: ${{ github.repository }}
+      run: |
+        if [[ -z "$GH_TOKEN" ]]; then
+          echo "review-gate: 'comment: true' needs 'github-token'" >&2
+          exit 1
+        fi
+        marker="<!-- review-gate -->"
+        body="$marker"$'\n'"$(cat "$MARKDOWN")"
+        existing=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+          --jq "[.[] | select(.body | startswith(\"$marker\"))][0].id // empty")
+        if [[ -n "$existing" ]]; then
+          gh api -X PATCH "repos/$REPO/issues/comments/$existing" -f body="$body" >/dev/null
+        else
+          gh api -X POST "repos/$REPO/issues/$PR/comments" -f body="$body" >/dev/null
+        fi

@@ -1,0 +1,83 @@
+# Review Gate rules for this repository.
+# Every rule is a sentence about the *diff*, not about file paths — paths are only
+# ever used as a cheap pre-filter to save tokens.
+version: 1
+
+defaults:
+  threshold: 0.6
+  min_confidence: 0.55
+  on_low_confidence: require
+  model: jev-latest
+
+reviewers:
+  maintainer:
+    description: Owns the CLI contract, the output schema and the action interface.
+  devops:
+    description: Owns CI workflows, the container image and release plumbing.
+  security:
+    description: Reviews anything touching credentials, network calls or untrusted input.
+
+always_reviewers: []
+fallback_reviewers: [maintainer]
+
+ignore_paths:
+  - "**/*.lock"
+  - "docs/**"
+
+rules:
+  - id: output-schema-change
+    question: >-
+      A field in the JSON result document is added, removed, renamed or changes type,
+      or the schema version changes.
+    reviewers: [maintainer]
+    criteria:
+      "true": Keys emitted in the result payload or the GitHub Action outputs change.
+      "false": Only internal variables, comments, formatting or tests change.
+    paths: ["src/review_gate/report.py", "src/review_gate/__init__.py", "action.yml"]
+
+  - id: cli-contract-change
+    question: >-
+      A command line flag or subcommand is added, removed or renamed, or an exit code
+      changes meaning.
+    reviewers: [maintainer]
+    paths: ["src/review_gate/cli.py"]
+
+  - id: threshold-semantics-change
+    question: >-
+      The logic that decides whether a rule fires — thresholds, confidence handling or
+      the fallback reviewer set — changes behaviour.
+    reviewers: [maintainer, security]
+    criteria:
+      "true": A comparison, default value or branch that gates the reviewer set changes.
+      "false": Refactoring that keeps the same decisions for the same inputs.
+    paths: ["src/review_gate/engine.py", "src/review_gate/config.py"]
+
+  - id: outbound-request-change
+    question: >-
+      The code changes which host it sends data to, what it sends there, or how it
+      authenticates.
+    reviewers: [security]
+    criteria:
+      "true": A URL, header, auth scheme or request body sent to an external service changes.
+      "false": Only timeouts, retries or error messages change.
+    paths: ["src/review_gate/classifier.py"]
+
+  - id: secret-exposure
+    question: >-
+      An API key, token or diff content could be written to logs, to the job summary or
+      to a file that is uploaded as an artifact.
+    reviewers: [security]
+
+  - id: ci-permissions-change
+    question: >-
+      A workflow gains permissions, runs on a trigger that can execute code from a fork,
+      or adds a third-party action.
+    reviewers: [devops, security]
+    paths: [".github/workflows/**", "action.yml", "Dockerfile"]
+
+  - id: release-surface-change
+    question: >-
+      The published container image, the entrypoint or the packaging metadata changes in a
+      way that affects consumers of the action.
+    reviewers: [devops]
+    paths: ["Dockerfile", "action.yml", "pyproject.toml"]

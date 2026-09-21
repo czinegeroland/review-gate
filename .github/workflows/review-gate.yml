@@ -1,0 +1,43 @@
+# Dogfooding: Review Gate classifies its own pull requests.
+name: Review Gate
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  reviewers:
+    name: Required reviewers
+    runs-on: ubuntu-latest
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    outputs:
+      required_reviewers: ${{ steps.gate.outputs.required_reviewers }}
+      degraded: ${{ steps.gate.outputs.degraded }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for an API key
+        id: key
+        env:
+          KEY: ${{ secrets.TYPESAFE_API_KEY }}
+        run: |
+          if [[ -n "$KEY" ]]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "TYPESAFE_API_KEY is not configured; skipping classification." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - id: gate
+        if: steps.key.outputs.present == 'true'
+        uses: ./
+        with:
+          config: .github/review-gate.yml
+          typesafe-api-key: ${{ secrets.TYPESAFE_API_KEY }}
+          comment: "true"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
